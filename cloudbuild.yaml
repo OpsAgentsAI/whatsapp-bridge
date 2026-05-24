@@ -1,0 +1,23 @@
+substitutions:
+  _AR_HOST: me-west1-docker.pkg.dev
+  _AR_PROJECT: opsagent-prod
+  _AR_REPO: whatsapp-bridge
+  _IMAGE: wa-bridge
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_AR_HOST}/${_AR_PROJECT}/${_AR_REPO}/${_IMAGE}:$SHORT_SHA
+      - -t
+      - ${_AR_HOST}/${_AR_PROJECT}/${_AR_REPO}/${_IMAGE}:latest
+      - .
+
+images:
+  - ${_AR_HOST}/${_AR_PROJECT}/${_AR_REPO}/${_IMAGE}:$SHORT_SHA
+  - ${_AR_HOST}/${_AR_PROJECT}/${_AR_REPO}/${_IMAGE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
