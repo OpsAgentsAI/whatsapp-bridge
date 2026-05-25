@@ -1,9 +1,10 @@
 FROM golang:1.24-alpine AS build
-RUN apk add --no-cache build-base sqlite-dev
+RUN apk add --no-cache build-base sqlite-dev git
 WORKDIR /src
 COPY whatsapp-bridge/go.mod whatsapp-bridge/go.sum ./
-RUN go mod download
 COPY whatsapp-bridge/ ./
+RUN go mod tidy
+RUN go mod download
 ENV CGO_ENABLED=1
 RUN go build -ldflags='-s -w' -o /whatsapp-bridge
 
