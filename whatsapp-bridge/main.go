@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -873,35 +874,51 @@ func main() {
 		// The QR loop below stays in place — it just ignores codes once pairing is
 		// initiated via phone, and the same "success" event fires either way.
 		pairPhone := strings.TrimSpace(os.Getenv("WA_PAIR_PHONE"))
-		pairCodeRequested := false
+		// Gate PairPhone behind sync.Once so it fires AT MOST ONCE per process
+		// lifetime — even across QR re-emits. The previous boolean approach was
+		// reset implicitly each loop iteration on some code paths, which led to
+		// rapid PairPhone bursts and WhatsApp rate-limiting (`status 429:
+		// rate-overlimit`). See card aWpwV4xr.
+		var pairOnce sync.Once
 
 		// Print QR code for pairing with phone
 		for evt := range qrChan {
 			if evt.Event == "code" {
-				if pairPhone != "" && !pairCodeRequested {
-					pairCodeRequested = true
-					code, perr := client.PairPhone(context.Background(), pairPhone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
-					if perr != nil {
-						logger.Errorf("PairPhone failed for %s: %v — falling back to QR", pairPhone, perr)
-						fmt.Println("\nScan this QR code with your WhatsApp app:")
-						qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				// Log raw QR data string with a distinctive marker so it can
+				// be grepped out of Cloud Logging and rendered locally via
+				// `qrencode -o qr.png -s 12 -l L "<raw-string>"`. The
+				// terminal ASCII rendering below stays as a fallback.
+				fmt.Printf("\n[QR-RAW-STRING] %s\n", evt.Code)
+
+				pairAttempted := false
+				if pairPhone != "" {
+					pairOnce.Do(func() {
+						pairAttempted = true
+						code, perr := client.PairPhone(context.Background(), pairPhone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+						if perr != nil {
+							logger.Errorf("PairPhone failed for %s: %v — falling back to QR", pairPhone, perr)
+							fmt.Println("\nScan this QR code with your WhatsApp app:")
+							qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+							return
+						}
+						fmt.Println("")
+						fmt.Println("========================================")
+						fmt.Println("  WHATSAPP LINKING CODE")
+						fmt.Println("========================================")
+						fmt.Printf("  Phone:        %s\n", pairPhone)
+						fmt.Printf("  Linking code: %s\n", code)
+						fmt.Println("========================================")
+						fmt.Println("  On your phone, open WhatsApp →")
+						fmt.Println("    Settings → Linked Devices →")
+						fmt.Println("    Link a Device → Link with phone number")
+						fmt.Println("  Enter the code above. Expires in ~160s.")
+						fmt.Println("========================================")
+						fmt.Println("")
+						logger.Infof("WhatsApp pairing code issued for %s: %s", pairPhone, code)
+					})
+					if pairAttempted {
 						continue
 					}
-					fmt.Println("")
-					fmt.Println("========================================")
-					fmt.Println("  WHATSAPP LINKING CODE")
-					fmt.Println("========================================")
-					fmt.Printf("  Phone:        %s\n", pairPhone)
-					fmt.Printf("  Linking code: %s\n", code)
-					fmt.Println("========================================")
-					fmt.Println("  On your phone, open WhatsApp →")
-					fmt.Println("    Settings → Linked Devices →")
-					fmt.Println("    Link a Device → Link with phone number")
-					fmt.Println("  Enter the code above. Expires in ~160s.")
-					fmt.Println("========================================")
-					fmt.Println("")
-					logger.Infof("WhatsApp pairing code issued for %s: %s", pairPhone, code)
-					continue
 				}
 				fmt.Println("\nScan this QR code with your WhatsApp app:")
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
