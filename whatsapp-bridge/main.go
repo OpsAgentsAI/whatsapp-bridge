@@ -866,9 +866,43 @@ func main() {
 			return
 		}
 
+		// Phone-number pairing fallback (WA_PAIR_PHONE env var).
+		// Set WA_PAIR_PHONE=<E.164 digits, no +> to request an 8-char linking code
+		// instead of scanning a QR. Per whatsmeow docs, Connect() must run first
+		// AND the QR channel must emit its first event before PairPhone is safe to call.
+		// The QR loop below stays in place — it just ignores codes once pairing is
+		// initiated via phone, and the same "success" event fires either way.
+		pairPhone := strings.TrimSpace(os.Getenv("WA_PAIR_PHONE"))
+		pairCodeRequested := false
+
 		// Print QR code for pairing with phone
 		for evt := range qrChan {
 			if evt.Event == "code" {
+				if pairPhone != "" && !pairCodeRequested {
+					pairCodeRequested = true
+					code, perr := client.PairPhone(context.Background(), pairPhone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+					if perr != nil {
+						logger.Errorf("PairPhone failed for %s: %v — falling back to QR", pairPhone, perr)
+						fmt.Println("\nScan this QR code with your WhatsApp app:")
+						qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+						continue
+					}
+					fmt.Println("")
+					fmt.Println("========================================")
+					fmt.Println("  WHATSAPP LINKING CODE")
+					fmt.Println("========================================")
+					fmt.Printf("  Phone:        %s\n", pairPhone)
+					fmt.Printf("  Linking code: %s\n", code)
+					fmt.Println("========================================")
+					fmt.Println("  On your phone, open WhatsApp →")
+					fmt.Println("    Settings → Linked Devices →")
+					fmt.Println("    Link a Device → Link with phone number")
+					fmt.Println("  Enter the code above. Expires in ~160s.")
+					fmt.Println("========================================")
+					fmt.Println("")
+					logger.Infof("WhatsApp pairing code issued for %s: %s", pairPhone, code)
+					continue
+				}
 				fmt.Println("\nScan this QR code with your WhatsApp app:")
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
 			} else if evt.Event == "success" {
